@@ -6,6 +6,8 @@ use std::{
     time::Duration,
 };
 
+#[cfg(feature = "ratatui")]
+pub use crate::utils::ratatui::SpinnerWidget;
 pub use crate::utils::spinner_names::SpinnerNames as Spinners;
 use crate::utils::spinners_data::SPINNERS as SpinnersMap;
 pub use crate::utils::stream::Stream;
@@ -15,7 +17,7 @@ mod utils;
 pub struct Spinner {
     sender: Sender<(Instant, Option<String>)>,
     join: Option<JoinHandle<()>>,
-    stream: Stream
+    stream: Stream,
 }
 
 impl Drop for Spinner {
@@ -64,7 +66,7 @@ impl Spinner {
     ///
     /// ```
     /// use spinners::{Spinner, Spinners, Stream};
-    /// 
+    ///
     /// let sp = Spinner::with_stream(Spinners::Dots, String::new(), Stream::Stderr);
     /// ```
     pub fn with_stream(spinner: Spinners, message: String, stream: Stream) -> Self {
@@ -79,26 +81,29 @@ impl Spinner {
     ///
     /// ```
     /// use spinners::{Spinner, Spinners, Stream};
-    /// 
+    ///
     /// let sp = Spinner::with_timer_and_stream(Spinners::Dots, String::new(), Stream::Stderr);
     /// ```
     pub fn with_timer_and_stream(spinner: Spinners, message: String, stream: Stream) -> Self {
         Self::new_inner(spinner, message, Some(Instant::now()), Some(stream))
     }
 
-    fn new_inner(spinner: Spinners, message: String, start_time: Option<Instant>, stream: Option<Stream>) -> Self 
-    {
+    fn new_inner(
+        spinner: Spinners,
+        message: String,
+        start_time: Option<Instant>,
+        stream: Option<Stream>,
+    ) -> Self {
         let spinner_name = spinner.to_string();
         let spinner_data = SpinnersMap
             .get(&spinner_name)
             .unwrap_or_else(|| panic!("No Spinner found with the given name: {}", spinner_name));
 
-        let stream = if let Some(stream) = stream { stream } else { Stream::default() };
-
+        let stream = stream.unwrap_or_default();
+        let mut stream_clone = stream.clone();
         let (sender, recv) = channel::<(Instant, Option<String>)>();
 
         let join = thread::spawn(move || 'outer: loop {
-
             for frame in spinner_data.frames.iter() {
                 let (do_stop, stop_time, stop_symbol) = match recv.try_recv() {
                     Ok((stop_time, stop_symbol)) => (true, Some(stop_time), stop_symbol),
@@ -108,7 +113,9 @@ impl Spinner {
 
                 let frame = stop_symbol.unwrap_or_else(|| frame.to_string());
 
-                stream.write(&frame, &message, start_time, stop_time).expect("IO Error");
+                stream_clone
+                    .write(&frame, &message, start_time, stop_time)
+                    .expect("IO Error");
 
                 if do_stop {
                     break 'outer;
@@ -121,7 +128,7 @@ impl Spinner {
         Self {
             sender,
             join: Some(join),
-            stream
+            stream,
         }
     }
 
@@ -232,7 +239,9 @@ impl Spinner {
     /// ```
     pub fn stop_and_persist(&mut self, symbol: &str, msg: String) {
         self.stop();
-        self.stream.stop(Some(&msg), Some(symbol)).expect("IO Error");
+        self.stream
+            .stop(Some(&msg), Some(symbol))
+            .expect("IO Error");
     }
 
     fn stop_inner(&mut self, stop_time: Instant, stop_symbol: Option<String>) {
